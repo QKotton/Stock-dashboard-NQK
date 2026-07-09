@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv*/
+
+# Cấu hình cục bộ của Claude Code (không cần cho web)
+.claude/
+
+# Secrets của Streamlit (nếu sau này có)
+.streamlit/secrets.toml
+
+# File báo cáo xuất ra khi chạy thử
+bao_cao_*.xlsx
+so_sanh_*.xlsx
+
+# Module tham khảo gốc (đã tích hợp vào analysis.py/data_loader.py)
+vn-stock-screener_1/

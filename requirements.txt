@@ -1,0 +1,15 @@
+# Cài đặt chuẩn (Streamlit Cloud / Python 3.10-3.12):
+#   pip install -r requirements.txt
+# Lưu ý Streamlit Cloud: trong Advanced settings chọn Python 3.12.
+#
+# Riêng máy local đang dùng Python 3.14 (numpy/pandas mà vnstock yêu cầu chưa có
+# wheel cho 3.14) — cài theo 2 lệnh sau thay vì file này:
+#   pip install --no-deps vnstock vnai vnstock_ezchart
+#   pip install streamlit pandas numpy plotly openpyxl matplotlib beautifulsoup4 importlib-metadata packaging psutil pydantic pytz requests seaborn tenacity cffi cycler mplfinance
+
+streamlit>=1.50
+vnstock>=4.0.4
+pandas>=2.0
+plotly>=5.20
+openpyxl>=3.1
+matplotlib>=3.8
