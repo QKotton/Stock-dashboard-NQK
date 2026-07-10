@@ -23,7 +23,8 @@ import data_loader
 
 st.set_page_config(page_title="VN Stock Dashboard", layout="wide", page_icon="📈")
 
-SOURCE = "VCI"
+# Nguồn dữ liệu: data_loader tự thử VCI trước rồi KBS (VCI chặn IP nước ngoài,
+# cần khi deploy cloud). Ưu tiên nguồn khác: đặt biến môi trường VNSTOCK_SOURCE.
 
 # ---------------------------------------------------------------------------
 # Giao diện: theme tối kiểu bảng điện tài chính (kết hợp .streamlit/config.toml)
@@ -101,37 +102,37 @@ hr { border-color: rgba(148, 163, 184, 0.14); }
 # ---------------------------------------------------------------------------
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
 def load_symbol_list() -> pd.DataFrame:
-    return data_loader.search_symbols(source=SOURCE)
+    return data_loader.search_symbols()
 
 
 @st.cache_data(ttl=15 * 60, show_spinner=False)
 def load_price_history(symbol: str, start: str, end: str, interval: str) -> pd.DataFrame:
-    return data_loader.get_price_history(symbol, start, end, interval=interval, source=SOURCE)
+    return data_loader.get_price_history(symbol, start, end, interval=interval)
 
 
 @st.cache_data(ttl=15 * 60, show_spinner=False)
 def load_index_history(index_symbol: str, start: str, end: str) -> pd.DataFrame:
-    return data_loader.get_index_history(index_symbol, start, end, source=SOURCE)
+    return data_loader.get_index_history(index_symbol, start, end)
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
 def load_overview(symbol: str) -> dict:
-    return data_loader.get_company_overview(symbol, source=SOURCE)
+    return data_loader.get_company_overview(symbol)
 
 
 @st.cache_data(ttl=6 * 3600, show_spinner=False)
 def load_ratios(symbol: str) -> dict:
-    return data_loader.get_key_ratios(symbol, source=SOURCE)
+    return data_loader.get_key_ratios(symbol)
 
 
 @st.cache_data(ttl=24 * 3600, show_spinner=False)
 def load_group_symbols(group: str) -> list[str]:
-    return data_loader.get_group_symbols(group, source=SOURCE)
+    return data_loader.get_group_symbols(group)
 
 
 @st.cache_data(ttl=5 * 60, show_spinner=False)
 def load_price_board(symbols: tuple[str, ...]) -> pd.DataFrame:
-    return data_loader.get_price_board(list(symbols), source=SOURCE)
+    return data_loader.get_price_board(list(symbols))
 
 
 @st.cache_data(ttl=15 * 60, show_spinner=False)

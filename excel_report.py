@@ -151,10 +151,26 @@ def normalize_ohlcv(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
 
 
 def fetch_daily_dong(symbol: str) -> pd.DataFrame:
-    """fetch_daily của mtf_vn30 trả giá theo nghìn đồng — quy về đồng cho báo cáo."""
-    df = fetch_daily(symbol)
-    df[["open", "high", "low", "close"]] = df[["open", "high", "low", "close"]] * 1000
-    return df
+    """OHLCV ngày, giá quy về đồng.
+
+    Thử fetch_daily của mtf_vn30 (nguồn VCI) trước; nếu lỗi (VCI chặn IP nước
+    ngoài khi deploy cloud) thì rơi về data_loader.get_price_history — hàm này
+    tự chuyển nguồn dự phòng KBS và đã trả giá theo đồng sẵn.
+    """
+    try:
+        df = fetch_daily(symbol)
+        df[["open", "high", "low", "close"]] = df[["open", "high", "low", "close"]] * 1000
+        return df
+    except Exception:
+        import data_loader
+
+        end = dt.date.today()
+        start = end - dt.timedelta(days=365 * 5)
+        hist = data_loader.get_price_history(symbol, str(start), str(end))
+        if hist.empty:
+            raise
+        hist = hist.assign(time=pd.to_datetime(hist["time"])).set_index("time").sort_index()
+        return hist[["open", "high", "low", "close", "volume"]].astype(float)
 
 
 def fetch_benchmark(index_symbol: str = "VNINDEX") -> pd.DataFrame:

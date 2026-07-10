@@ -36,7 +36,31 @@ import analysis
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SOURCE = "VCI"
+# Nguồn dữ liệu: VCI đầy đủ nhất nhưng chặn IP nước ngoài (deploy cloud sẽ lỗi
+# ConnectionError). KBS làm nguồn dự phòng — dữ liệu nghèo trường hơn nhưng đủ
+# cho giá/bảng giá/danh sách mã. Đặt biến môi trường VNSTOCK_SOURCE=KBS nếu
+# muốn ưu tiên KBS ngay từ đầu (ví dụ khi chạy trên server nước ngoài).
+DEFAULT_SOURCE = os.environ.get("VNSTOCK_SOURCE", "VCI").upper()
+FALLBACK_SOURCES = ["VCI", "KBS"]
+
+
+def _source_chain(source: str | None) -> list[str]:
+    """Danh sách nguồn sẽ thử theo thứ tự. source chỉ định -> chỉ dùng nguồn đó."""
+    if source:
+        return [source.upper()]
+    return [DEFAULT_SOURCE] + [s for s in FALLBACK_SOURCES if s != DEFAULT_SOURCE]
+
+
+def _try_sources(fn, what: str, source: str | None = None):
+    """Chạy fn(source) lần lượt qua các nguồn, trả kết quả đầu tiên thành công."""
+    last_exc: Exception | None = None
+    for src in _source_chain(source):
+        try:
+            return fn(src)
+        except Exception as exc:
+            logger.warning("%s: nguồn %s lỗi (%s) — thử nguồn kế tiếp", what, src, exc)
+            last_exc = exc
+    raise last_exc if last_exc else RuntimeError(f"{what}: không có nguồn dữ liệu nào")
 OHLCV_COLUMNS = ["time", "open", "high", "low", "close", "volume"]
 
 # Các chỉ số chính của thị trường Việt Nam: mã (vnstock) -> tên hiển thị
@@ -67,35 +91,52 @@ def get_price_history(
     start: str,
     end: str,
     interval: str = "1D",
-    source: str = DEFAULT_SOURCE,
+    source: str | None = None,
 ) -> pd.DataFrame:
     """Lấy dữ liệu giá lịch sử OHLCV. Trả về DataFrame với cột: time, open, high, low, close, volume.
 
     vnstock trả về giá theo đơn vị nghìn đồng (vd: 55.3), trong khi phần tổng quan công ty
     (get_company_overview) trả về giá theo đơn vị đồng (vd: 54900.0). Ở đây quy đổi giá về
     đơn vị đồng để nhất quán trong toàn bộ dashboard.
+
+    source=None -> tự thử lần lượt các nguồn (VCI rồi KBS).
     """
-    quote = Quote(symbol=symbol.upper(), source=source)
-    df = quote.history(start=start, end=end, interval=interval)
-    if df is None or df.empty:
-        return pd.DataFrame(columns=OHLCV_COLUMNS)
-    df = df.rename(columns=str.lower)
-    df = df.sort_values("time").reset_index(drop=True)
-    df[["open", "high", "low", "close"]] = df[["open", "high", "low", "close"]] * 1000
-    return df[OHLCV_COLUMNS]
+
+    def _fetch(src: str) -> pd.DataFrame:
+        quote = Quote(symbol=symbol.upper(), source=src)
+        df = quote.history(start=start, end=end, interval=interval)
+        if df is None or df.empty:
+            return pd.DataFrame(columns=OHLCV_COLUMNS)
+        df = df.rename(columns=str.lower)
+        df = df.sort_values("time").reset_index(drop=True)
+        df[["open", "high", "low", "close"]] = df[["open", "high", "low", "close"]] * 1000
+        return df[OHLCV_COLUMNS]
+
+    return _try_sources(_fetch, f"Giá lịch sử {symbol}", source)
 
 
-def get_company_overview(symbol: str, source: str = DEFAULT_SOURCE) -> dict:
+def get_company_overview(symbol: str, source: str | None = None) -> dict:
     """Lấy thông tin tổng quan công ty: giá hiện tại, vốn hóa, vùng giá 52 tuần,
-    tỷ lệ sở hữu nước ngoài, khuyến nghị của công ty chứng khoán, giá mục tiêu..."""
-    company = Company(symbol=symbol.upper(), source=source)
-    df = company.overview()
-    if df is None or df.empty:
+    tỷ lệ sở hữu nước ngoài, khuyến nghị của công ty chứng khoán, giá mục tiêu...
+
+    Lưu ý: nguồn KBS (dự phòng) trả về ít trường hơn VCI nhiều — phần hiển thị
+    phải dùng .get() và chấp nhận N/A.
+    """
+
+    def _fetch(src: str) -> dict:
+        company = Company(symbol=symbol.upper(), source=src)
+        df = company.overview()
+        if df is None or df.empty:
+            return {}
+        return df.iloc[0].to_dict()
+
+    try:
+        return _try_sources(_fetch, f"Tổng quan {symbol}", source)
+    except Exception:
         return {}
-    return df.iloc[0].to_dict()
 
 
-def get_key_ratios(symbol: str, source: str = DEFAULT_SOURCE) -> dict:
+def get_key_ratios(symbol: str, source: str | None = None) -> dict:
     """Lấy một số chỉ số tài chính cơ bản (P/E, P/B, ROE, ROA, biên lợi nhuận...).
 
     Lưu ý: bảng ratio() của vnstock hiện gắn nhãn kỳ báo cáo không ổn định, nên hàm
@@ -103,8 +144,13 @@ def get_key_ratios(symbol: str, source: str = DEFAULT_SOURCE) -> dict:
     mà nguồn trả về). Vì vậy đây chỉ là số tham khảo, không chắc là quý mới nhất.
     """
     try:
-        finance = Finance(symbol=symbol.upper(), source=source, period="quarter", get_all=False)
-        df = finance.ratio()
+        df = _try_sources(
+            lambda src: Finance(
+                symbol=symbol.upper(), source=src, period="quarter", get_all=False
+            ).ratio(),
+            f"Chỉ số tài chính {symbol}",
+            source,
+        )
     except Exception:
         return {}
 
@@ -127,11 +173,14 @@ def get_key_ratios(symbol: str, source: str = DEFAULT_SOURCE) -> dict:
     return result
 
 
-def search_symbols(source: str = DEFAULT_SOURCE) -> pd.DataFrame:
+def search_symbols(source: str | None = None) -> pd.DataFrame:
     """Trả về danh sách toàn bộ mã cổ phiếu niêm yết kèm tên công ty."""
-    listing = Listing(source=source)
-    df = listing.all_symbols()
-    return df.sort_values("symbol").reset_index(drop=True)
+
+    def _fetch(src: str) -> pd.DataFrame:
+        df = Listing(source=src).all_symbols()
+        return df.sort_values("symbol").reset_index(drop=True)
+
+    return _try_sources(_fetch, "Danh sách mã", source)
 
 
 def get_index_history(
@@ -139,44 +188,39 @@ def get_index_history(
     start: str,
     end: str,
     interval: str = "1D",
-    source: str = DEFAULT_SOURCE,
+    source: str | None = None,
 ) -> pd.DataFrame:
     """Lấy lịch sử một chỉ số thị trường (VNINDEX, VN30, HNXINDEX, UPCOMINDEX...).
 
     Khác với giá cổ phiếu, chỉ số tính bằng điểm nên giữ nguyên giá trị gốc,
     không quy đổi đơn vị.
     """
-    quote = Quote(symbol=index_symbol.upper(), source=source)
-    df = quote.history(start=start, end=end, interval=interval)
-    if df is None or df.empty:
-        return pd.DataFrame(columns=OHLCV_COLUMNS)
-    df = df.rename(columns=str.lower)
-    df = df.sort_values("time").reset_index(drop=True)
-    return df[OHLCV_COLUMNS]
+
+    def _fetch(src: str) -> pd.DataFrame:
+        quote = Quote(symbol=index_symbol.upper(), source=src)
+        df = quote.history(start=start, end=end, interval=interval)
+        if df is None or df.empty:
+            return pd.DataFrame(columns=OHLCV_COLUMNS)
+        df = df.rename(columns=str.lower)
+        df = df.sort_values("time").reset_index(drop=True)
+        return df[OHLCV_COLUMNS]
+
+    return _try_sources(_fetch, f"Chỉ số {index_symbol}", source)
 
 
-def get_group_symbols(group: str = "VN30", source: str = DEFAULT_SOURCE) -> list[str]:
+def get_group_symbols(group: str = "VN30", source: str | None = None) -> list[str]:
     """Danh sách mã cổ phiếu thuộc một rổ chỉ số (vd: VN30, HNX30)."""
-    listing = Listing(source=source)
-    symbols = listing.symbols_by_group(group)
-    return list(symbols)
+    return _try_sources(
+        lambda src: list(Listing(source=src).symbols_by_group(group)),
+        f"Rổ {group}",
+        source,
+    )
 
 
-def get_price_board(symbols: list[str], source: str = DEFAULT_SOURCE) -> pd.DataFrame:
-    """Bảng giá trực tiếp của một nhóm mã: giá khớp, thay đổi so với tham chiếu,
-    khối lượng, giá trị giao dịch, và mua/bán ròng của khối ngoại.
-
-    Đơn vị sau khi chuẩn hóa: giá theo đồng, khối lượng theo cổ phiếu,
-    các cột giá trị (value, foreign_*) theo đồng.
-    (API gốc trả về accumulated_value theo triệu đồng còn foreign_*_value theo
-    đồng, nên ở đây quy tất cả về đồng cho nhất quán.)
-    """
-    trading = Trading(source=source)
-    raw = trading.price_board(symbols_list=symbols)
-    if raw is None or raw.empty:
-        return pd.DataFrame()
-
-    df = pd.DataFrame(
+def _parse_board_vci(raw: pd.DataFrame) -> pd.DataFrame:
+    """Bảng giá VCI: cột MultiIndex; accumulated_value theo TRIỆU đồng,
+    foreign_*_value theo đồng — quy tất cả về đồng."""
+    return pd.DataFrame(
         {
             "symbol": raw[("listing", "symbol")],
             "exchange": raw[("listing", "exchange")],
@@ -190,12 +234,49 @@ def get_price_board(symbols: list[str], source: str = DEFAULT_SOURCE) -> pd.Data
             "foreign_sell_value": raw[("match", "foreign_sell_value")],
         }
     )
-    # Mã chưa có giao dịch trong phiên (price = 0) thì lấy giá tham chiếu để tránh -100%
-    df["price"] = df["price"].where(df["price"] > 0, df["ref_price"])
-    df["change"] = df["price"] - df["ref_price"]
-    df["pct_change"] = (df["change"] / df["ref_price"].replace(0, pd.NA)) * 100
-    df["foreign_net_value"] = df["foreign_buy_value"] - df["foreign_sell_value"]
-    return df.sort_values("pct_change", ascending=False).reset_index(drop=True)
+
+
+def _parse_board_kbs(raw: pd.DataFrame) -> pd.DataFrame:
+    """Bảng giá KBS: cột phẳng; khối ngoại chỉ có KHỐI LƯỢNG nên giá trị
+    mua/bán ròng được ước lượng = khối lượng x giá khớp (ghi chú trong CLAUDE.md)."""
+    price = raw["close_price"].where(raw["close_price"] > 0, raw["reference_price"])
+    return pd.DataFrame(
+        {
+            "symbol": raw["symbol"],
+            "exchange": raw["exchange"],
+            "ref_price": raw["reference_price"],
+            "price": raw["close_price"],
+            "high": raw["high_price"],
+            "low": raw["low_price"],
+            "volume": raw["volume_accumulated"],
+            "value": raw["total_value"],
+            "foreign_buy_value": raw["foreign_buy_volume"] * price,
+            "foreign_sell_value": raw["foreign_sell_volume"] * price,
+        }
+    )
+
+
+def get_price_board(symbols: list[str], source: str | None = None) -> pd.DataFrame:
+    """Bảng giá trực tiếp của một nhóm mã: giá khớp, thay đổi so với tham chiếu,
+    khối lượng, giá trị giao dịch, và mua/bán ròng của khối ngoại.
+
+    Đơn vị sau khi chuẩn hóa: giá theo đồng, khối lượng theo cổ phiếu,
+    các cột giá trị (value, foreign_*) theo đồng.
+    """
+
+    def _fetch(src: str) -> pd.DataFrame:
+        raw = Trading(source=src).price_board(symbols_list=symbols)
+        if raw is None or raw.empty:
+            return pd.DataFrame()
+        df = _parse_board_kbs(raw) if src == "KBS" else _parse_board_vci(raw)
+        # Mã chưa có giao dịch trong phiên (price = 0) thì lấy giá tham chiếu để tránh -100%
+        df["price"] = df["price"].where(df["price"] > 0, df["ref_price"])
+        df["change"] = df["price"] - df["ref_price"]
+        df["pct_change"] = (df["change"] / df["ref_price"].replace(0, pd.NA)) * 100
+        df["foreign_net_value"] = df["foreign_buy_value"] - df["foreign_sell_value"]
+        return df.sort_values("pct_change", ascending=False).reset_index(drop=True)
+
+    return _try_sources(_fetch, "Bảng giá", source)
 
 
 def run_screen(
@@ -207,7 +288,7 @@ def run_screen(
     lookback_days: int = 400,
     sleep_between_calls: float = 0.8,
     progress_callback=None,
-    source: str = DEFAULT_SOURCE,
+    source: str | None = None,
 ) -> pd.DataFrame:
     """Sàng lọc cả watchlist theo 6 tiêu chí kỹ thuật (xem analysis.score_symbol).
 
