@@ -200,9 +200,6 @@ st.markdown(
       VN Stock Dashboard
     </span>
   </h1>
-  <p style="color: #94a3b8; margin: 0; font-size: 0.95rem;">
-    Toàn cảnh thị trường chứng khoán Việt Nam · dữ liệu trực tiếp từ VCI · dành cho người đang học nghề
-  </p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -304,10 +301,6 @@ with right_col:
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
         )
         st.plotly_chart(cmp_fig, use_container_width=True)
-        st.caption(
-            "Mỗi đường là mức tăng/giảm (%) so với đầu giai đoạn — giúp so sánh các chỉ số "
-            "có thang điểm khác nhau trên cùng một biểu đồ."
-        )
 
 # ---------------------------------------------------------------------------
 # CỘT TRÁI: số liệu nhảy của thị trường + các mã có tín hiệu đi lên
@@ -498,11 +491,6 @@ st.divider()
 # SÀNG LỌC CỔ PHIẾU (tích hợp từ vn-stock-screener_1)
 # ===========================================================================
 st.header("🎯 Sàng lọc cổ phiếu theo tín hiệu kỹ thuật")
-st.caption(
-    "Chấm điểm mỗi mã theo 6 tiêu chí (mỗi tiêu chí 1 điểm). Điểm càng cao, "
-    "càng nhiều tín hiệu kỹ thuật tích cực cùng lúc. "
-    "⚠️ Đây là công cụ sàng lọc phục vụ phân tích và học tập, không phải khuyến nghị đầu tư."
-)
 
 default_watchlist = ", ".join(vn30_symbols) if not board.empty else (
     "FPT, MWG, HPG, VCB, TCB, MBB, ACB, STB, SSI, VND, VCI, HCM, "
@@ -642,7 +630,9 @@ st.sidebar.title("Bộ lọc (Phân tích cổ phiếu)")
 with st.sidebar.expander("Tìm mã theo tên công ty"):
     try:
         symbol_df = load_symbol_list()
-        keyword = st.text_input("Nhập từ khóa (vd: sữa, thép, ngân hàng...)")
+        keyword = st.text_input(
+            "Nhập từ khóa (vd: sữa, thép, ngân hàng...)", key="kw_search"
+        )
         if keyword:
             matches = symbol_df[
                 symbol_df["organ_name"].str.contains(keyword, case=False, na=False)
@@ -652,27 +642,28 @@ with st.sidebar.expander("Tìm mã theo tên công ty"):
     except Exception as exc:
         st.caption(f"Không tải được danh sách mã: {exc}")
 
-symbol = st.sidebar.text_input("Mã cổ phiếu", value="VNM").strip().upper()
+symbol = st.sidebar.text_input("Mã cổ phiếu", value="VNM", key="analyze_symbol").strip().upper()
 
 default_start = today - dt.timedelta(days=365)
 date_range = st.sidebar.date_input(
     "Khoảng thời gian",
     value=(default_start, today),
     max_value=today,
+    key="analyze_dates",
 )
 if isinstance(date_range, tuple) and len(date_range) == 2:
     start_date, end_date = date_range
 else:
     start_date, end_date = default_start, today
 
-interval = st.sidebar.selectbox("Khung thời gian nến", ["1D", "1W", "1M"], index=0)
+interval = st.sidebar.selectbox("Khung thời gian nến", ["1D", "1W", "1M"], index=0, key="analyze_interval")
 ma_windows = st.sidebar.multiselect(
-    "Đường trung bình động (MA)", [10, 20, 50, 100, 200], default=[20, 50]
+    "Đường trung bình động (MA)", [10, 20, 50, 100, 200], default=[20, 50], key="analyze_ma"
 )
-rsi_period = st.sidebar.slider("Chu kỳ RSI", min_value=5, max_value=30, value=14)
+rsi_period = st.sidebar.slider("Chu kỳ RSI", min_value=5, max_value=30, value=14, key="analyze_rsi")
 
 st.sidebar.caption(
-    "Dữ liệu lấy trực tiếp từ nguồn VCI qua thư viện `vnstock`. "
+    "Dữ liệu lấy trực tiếp qua thư viện `vnstock` (nguồn VCI, tự chuyển KBS nếu VCI lỗi). "
     "Ứng dụng này chỉ phục vụ mục đích học tập, không phải khuyến nghị đầu tư."
 )
 
@@ -1044,6 +1035,7 @@ report_symbols_raw = exp_col1.text_input(
     "Mã cần phân tích (1 hoặc nhiều, cách nhau dấu phẩy)",
     value=symbol,
     help="Ví dụ: ACB hoặc ACB, FPT, HPG — mã bất kỳ trên HOSE/HNX/UPCoM.",
+    key="report_symbols",
 )
 uploaded_file = exp_col2.file_uploader(
     "Hoặc upload file OHLCV (CSV/XLSX) cho MỘT mã",
